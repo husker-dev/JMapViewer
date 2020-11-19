@@ -1,28 +1,24 @@
 package com.husker.mapbrowser;
 
 
-import javax.imageio.ImageIO;
+import com.husker.mapbrowser.impl.OpenStreetMap;
+
 import javax.swing.*;
 import java.awt.*;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.awt.event.MouseWheelEvent;
-import java.awt.image.BufferedImage;
-import java.net.URL;
-import java.net.URLConnection;
+import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.TimerTask;
 
+import static java.lang.Math.*;
+
 public class MapPanel extends JPanel {
 
-    public static final String PATTERN_OPEN_STREET_MAP = "https://c.tile.openstreetmap.org/{z}/{x}/{y}.png";
-    public static final String PATTERN_CARTO_LIGHT = "https://cartodb-basemaps-c.global.ssl.fastly.net/light_all/{z}/{x}/{y}.png";
-    public static final String PATTERN_CARTO_DARK = "https://cartodb-basemaps-c.global.ssl.fastly.net/dark_all/{z}/{x}/{y}.png";
-
-    private final int chunk_size = 128;
-    private final int levels = 20;
+    private final int chunk_size = 256;
 
     private double oldZoom = -1;
     private int oldX = -1;
@@ -34,36 +30,50 @@ public class MapPanel extends JPanel {
     private double x = 0;
     private double y = 0;
 
-    private final ArrayList<ChunkLoader> loaders = new ArrayList<>();
+    private final List<Chunk> chunks = Collections.synchronizedList(new ArrayList<Chunk>());
+    private final ArrayList<MapPoint> points = new ArrayList<>();
 
-    private String pattern = PATTERN_OPEN_STREET_MAP;
+    private boolean smoothZoom = true;
 
-    public MapPanel(String pattern){
+    private Map map = new OpenStreetMap();
+
+    public MapPanel(Map map){
         this();
-        setURLPattern(pattern);
+        setMap(map);
     }
 
     public MapPanel(){
         new java.util.Timer().schedule(new TimerTask() {
+            long lastTime = System.currentTimeMillis();
             public void run() {
+                long currentTime = System.currentTimeMillis();
+                int delta = (int)(currentTime - lastTime);
+                lastTime = currentTime;
+
+                try {
+                    for (Chunk chunk : chunks)
+                        chunk.addAlpha(delta / 200d);
+                } catch (Exception ignored) {
+                }
+
                 zoom += (to_zoom - zoom) / 10d;
 
-                if(Math.abs(zoom - to_zoom) < 0.000001) {
+                if (Math.abs(zoom - to_zoom) < 0.01)
                     zoom = to_zoom;
-                }else{
-                    updateZoom();
-                    repaint();
-                }
+
+                updateZoom();
+                repaint();
+
             }
         }, 0, 10);
         addMouseWheelListener(new MouseAdapter() {
             public void mouseWheelMoved(MouseWheelEvent e) {
                 if(e.getWheelRotation() < 0)
-                    to_zoom += 0.1;
+                    to_zoom += smoothZoom ? 0.1 : 1;
                 else
-                    to_zoom -= 0.1;
-                to_zoom = Math.max(0, to_zoom);
-                to_zoom = Math.min(levels, to_zoom);
+                    to_zoom -= smoothZoom ? 0.1 : 1;
+                to_zoom = Math.max(map.getMinimumZoom(), to_zoom);
+                to_zoom = Math.min(map.getMaximumZoom(), to_zoom);
 
                 Point point = getMousePosition();
                 if(point != null)
@@ -98,35 +108,57 @@ public class MapPanel extends JPanel {
                 repaint();
             }
         });
-
     }
 
-    public void setURLPattern(String pattern){
-        this.pattern = pattern;
+    public List<Chunk> getChunks(){
+        return chunks;
+    }
+
+    public void setMap(Map map){
+        this.map = map;
+        repaint();
+    }
+
+    public Map getMap(){
+        return map;
+    }
+
+    public void setSmoothZoom(boolean smoothZoom){
+        this.smoothZoom = smoothZoom;
+    }
+
+    public void addPoint(MapPoint point){
+        points.add(point);
+        repaint();
     }
 
     public void paint(Graphics g) {
         super.paint(g);
+
         updateTiles();
         Graphics2D g2d = (Graphics2D) g;
         g2d.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR);
 
         g2d.setColor(new Color(0, 0, 0, 100));
-        for(int level = Math.max(0, (int)zoom - 1); level < Math.max(1, zoom); level++){
-            for(int x = getChunkX(level); x < getChunkX(level) + getChunkWidth(level); x++) {
-                for (int y = getChunkY(level); y < getChunkY(level) + getChunkHeight(level); y++) {
-                    int r_x = (int) (this.x + x * getCurrentChunkSize(level));
-                    int r_y = (int) (this.y + y * getCurrentChunkSize(level));
-                    int mapSize = (int)Math.pow(2, level);
+        for (int level = map.getMinimumZoom(); level < map.getMaximumZoom(); level++) {
+            try {
+                for (Chunk loader : chunks) {
+                    if (loader.getZoom() == level && loader.getImage() != null) {
+                        // BigDecimal used for accurate calculations
+                        int r_x = new SimpleBigDecimal(loader.getX()).multiply(getChunkSize(level)).add(this.x).intValue();
+                        int r_y = new SimpleBigDecimal(loader.getY()).multiply(getChunkSize(level)).add(this.y).intValue();
 
-                    if(x >= 0 & x < mapSize && y >= 0 & y < mapSize) {
-                        ChunkLoader loader = getChunkLoader(level, x, y);
-
-                        if (loader != null && loader.getImage() != null)
-                            g2d.drawImage(loader.getImage(), r_x - 1, r_y - 1, (int)getCurrentChunkSize(level) + 2, (int)getCurrentChunkSize(level) + 2, null);
+                        g2d.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, (float)loader.getAlpha()));
+                        g2d.drawImage(loader.getImage(), r_x - 1, r_y - 1, (int) getChunkSize(level) + 2, (int) getChunkSize(level) + 2, null);
                     }
                 }
-            }
+            } catch (Exception ignored) { }
+        }
+        g2d.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, 1));
+
+        for(MapPoint point : points) {
+            Point coordinates = map.getCoordinates(point.getLatitude(), point.getLongitude(), getChunkSize(0));
+            point.draw(g2d, (int)(coordinates.x + this.x), (int)(coordinates.y + this.y));
         }
     }
 
@@ -147,161 +179,112 @@ public class MapPanel extends JPanel {
     }
 
     private void updateTiles(){
-        for(int level = Math.max(0, (int)zoom - 1); level < Math.max(1, zoom); level++) {
-            int mapSize = (int) Math.pow(2, level);
+        try {
+            int zoom = getCurrentZoom();
 
-            for (int x = getChunkX(level); x < getChunkX(level) + getChunkWidth(level); x++) {
-                for (int y = getChunkY(level); y < getChunkY(level) + getChunkHeight(level); y++) {
-                    if (x < 0 || x >= mapSize)
+            int centerX = (int)(getChunkX(zoom) + getChunkWidth(zoom) / 2d);
+            int centerY = (int)(getChunkY(zoom) + getChunkHeight(zoom) / 2d);
+
+            for(double radius = 0; radius < Math.max(getChunkWidth(zoom), getChunkHeight(zoom)) / 2d + 1; radius += 0.3) {
+                for (double angle = 0; angle < Math.PI * 2; angle += 0.1) {
+                    int x = (int)(centerX + radius * Math.cos(angle));
+                    int y = (int)(centerY + radius * Math.sin(angle));
+
+                    if(y < 0 || y >= Math.pow(2, zoom))
                         continue;
-                    if (y < 0 || y >= mapSize)
+                    if(x < 0 || x >= Math.pow(2, zoom))
                         continue;
 
-                    if (getChunkLoader(level, x, y) == null)
-                        loaders.add(new ChunkLoader(this, level, x, y));
+                    if(isOnScreen(zoom, x, y) && getChunk(zoom, x, y) == null)
+                        chunks.add(new Chunk(this, zoom, x, y));
                 }
             }
-        }
 
-        try {
-            loaders.removeIf(loader -> !isVisibleChunk(loader));
-        }catch (Exception ignored){
-        }
+            for (int level = map.getMaximumZoom(); level >= map.getMinimumZoom(); level--) {
+                final int LEVEL = level;
+                try {
+                    chunks.removeIf(chunk -> chunk.getZoom() == LEVEL && !chunk.isValid());
+                }catch (Exception ex){
+                    ex.printStackTrace();
+                }
+            }
 
+        }catch (Exception ignored){ }
     }
 
-    private ChunkLoader getChunkLoader(int zoom, int x, int y){
-        for(ChunkLoader loader : loaders)
-            if(loader != null && loader.zoom == zoom && loader.x == x && loader.y == y)
+    public int getMinimumZoom(){
+        return map.getMinimumZoom();
+    }
+
+    public int getMaximumZoom(){
+        return map.getMaximumZoom();
+    }
+
+    public int getCurrentZoom(){
+        int zoom = Math.max(0, (int) this.zoom);
+        if(!smoothZoom && to_zoom > this.zoom)
+            zoom = zoom + 1;
+        return zoom;
+    }
+
+    Chunk getChunk(int zoom, int x, int y){
+        for(Chunk loader : chunks)
+            if(loader != null && loader.getZoom() == zoom && loader.getX() == x && loader.getY() == y)
                 return loader;
         return null;
     }
 
     private int getChunkX(int level){
-        int startX = (int)(-x / getCurrentChunkSize(level));
+        int startX = (int)(-x / getChunkSize(level));
         if(x > 0)
             startX -= 1;
         return startX;
     }
 
     private int getChunkY(int level){
-        int startY = (int)(-y / getCurrentChunkSize(level));
+        int startY = (int)(-y / getChunkSize(level));
         if(y > 0)
             startY -= 1;
         return startY;
     }
 
     private int getChunkWidth(int level){
-        return (int)((float)getWidth() / getCurrentChunkSize(level)) + 2;
+        return (int)((float)getWidth() / getChunkSize(level)) + 2;
     }
 
     private int getChunkHeight(int level){
-        return (int)((float)getHeight() / getCurrentChunkSize(level)) + 2;
+        return (int)((float)getHeight() / getChunkSize(level)) + 2;
     }
 
-    private double getCurrentChunkSize(int level){
+    private double getChunkSize(int level){
         return chunk_size * Math.pow(2, zoom) / Math.pow(2, level);
     }
 
-    private boolean isVisibleChunk(ChunkLoader loader){
-        if(loader == null || !loaders.contains(loader))
-            return false;
-        return isVisibleChunk(loader.zoom, loader.x, loader.y);
+    private boolean isOnScreen(int zoom, int x, int y){
+        return x >= getChunkX(zoom) && y >= getChunkY(zoom) && x < getChunkX(zoom) + getChunkWidth(zoom) && y < getChunkY(zoom) + getChunkHeight(zoom);
     }
 
-    private boolean isVisibleChunk(int zoom, int x, int y){
-        boolean onScreen = x >= getChunkX(zoom) && y >= getChunkY(zoom) && x < getChunkX(zoom) + getChunkWidth(zoom) && y < getChunkY(zoom) + getChunkHeight(zoom);
-        if(!onScreen)
-            return false;
-        if(zoom == (int)this.zoom)
-            return true;
-        if(zoom == (int)this.zoom - 1){
-            ChunkLoader[] child = new ChunkLoader[]{
-                    getChunkLoader(zoom + 1, x * 2, y * 2),
-                    getChunkLoader(zoom + 1, x * 2 + 1, y * 2),
-                    getChunkLoader(zoom + 1, x * 2, y * 2 + 1),
-                    getChunkLoader(zoom + 1, x * 2 + 1, y * 2 + 1)
-            };
-            boolean allVisible = true;
-            for(ChunkLoader loader : child)
-                if (loader == null || loader.getImage() == null) {
-                    allVisible = false;
-                    break;
-                }
-            return !allVisible;
-        }
-
-        return false;
+    boolean isOnScreen(Chunk chunk){
+        return isOnScreen(chunk.getZoom(), chunk.getX(), chunk.getY());
     }
 
+    private static class SimpleBigDecimal extends BigDecimal{
 
-    private static class ChunkLoader {
-
-        private BufferedImage image;
-        private static final List<ChunkLoader> loadingQueue = Collections.synchronizedList(new ArrayList<ChunkLoader>());
-
-        static {
-            for(int i = 0; i < Runtime.getRuntime().availableProcessors(); i++)
-                startLoader();
+        public SimpleBigDecimal(double val) {
+            super(val);
         }
 
-        private static void startLoader(){
-            new Thread(() -> {
-                while(true){
-                    if(loadingQueue.size() == 0){
-                        try {
-                            Thread.sleep(10);
-                        } catch (InterruptedException ignored) {}
-                    }else {
-                        try {
-                            ChunkLoader loader = loadingQueue.remove(0);
-                            if(loader == null)
-                                continue;
-                            if (loader.panel.isVisibleChunk(loader)) {
-                                loader.load();
-                                loader.panel.repaint();
-                            }else
-                                loader.panel.loaders.remove(loader);
-                        }catch (Exception ignored){
-                        }
-                    }
-                }
-            }).start();
+        public SimpleBigDecimal(BigDecimal bigDecimal) {
+            super(bigDecimal.toPlainString());
         }
 
-        private final int zoom, x, y;
-        private final MapPanel panel;
-
-        public ChunkLoader(MapPanel panel, int zoom, int x, int y){
-            this.zoom = zoom;
-            this.x = x;
-            this.y = y;
-            this.panel = panel;
-
-            loadingQueue.add(this);
+        public SimpleBigDecimal add(double d){
+            return new SimpleBigDecimal(super.add(BigDecimal.valueOf(d)));
         }
 
-        public void load() throws Exception{
-            image = loadImageFromURL(panel.pattern.replace("{x}", x + "").replace("{y}", y + "").replace("{z}", zoom + ""));
-        }
-
-        public BufferedImage getImage(){
-            return image;
-        }
-
-        private static BufferedImage loadImageFromURL(String url) throws Exception {
-            URLConnection hc = new URL(url).openConnection();
-            hc.setRequestProperty("User-Agent", "Mozilla/5.0 (Macintosh; U; Intel Mac OS X 10.4; en-US; rv:1.9.2.2) Gecko/20100316 Firefox/3.6.2");
-
-            return ImageIO.read(hc.getInputStream());
-        }
-
-        public String toString() {
-            return "ChunkLoader{" +
-                    "zoom=" + zoom +
-                    ", x=" + x +
-                    ", y=" + y +
-                    '}';
+        public SimpleBigDecimal multiply(double d){
+            return new SimpleBigDecimal(super.multiply(BigDecimal.valueOf(d)));
         }
     }
+
 }
