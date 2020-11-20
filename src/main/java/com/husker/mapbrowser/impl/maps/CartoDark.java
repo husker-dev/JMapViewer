@@ -1,4 +1,4 @@
-package com.husker.mapbrowser.impl;
+package com.husker.mapbrowser.impl.maps;
 
 import com.husker.mapbrowser.Map;
 

@@ -1,20 +1,19 @@
 package com.husker.mapbrowser;
 
 
-import com.husker.mapbrowser.impl.OpenStreetMap;
+import com.husker.mapbrowser.impl.maps.OpenStreetMap;
 
 import javax.swing.*;
 import java.awt.*;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.awt.event.MouseWheelEvent;
+import java.awt.geom.Point2D;
 import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.TimerTask;
-
-import static java.lang.Math.*;
 
 public class MapPanel extends JPanel {
 
@@ -33,7 +32,7 @@ public class MapPanel extends JPanel {
     private final List<Chunk> chunks = Collections.synchronizedList(new ArrayList<Chunk>());
     private final ArrayList<MapPoint> points = new ArrayList<>();
 
-    private boolean smoothZoom = true;
+    private boolean smoothZoom = false;
 
     private Map map = new OpenStreetMap();
 
@@ -63,7 +62,6 @@ public class MapPanel extends JPanel {
 
                 updateZoom();
                 repaint();
-
             }
         }, 0, 10);
         addMouseWheelListener(new MouseAdapter() {
@@ -73,7 +71,7 @@ public class MapPanel extends JPanel {
                 else
                     to_zoom -= smoothZoom ? 0.1 : 1;
                 to_zoom = Math.max(map.getMinimumZoom(), to_zoom);
-                to_zoom = Math.min(map.getMaximumZoom(), to_zoom);
+                to_zoom = Math.min(map.getMaximumZoom() - 1, to_zoom);
 
                 Point point = getMousePosition();
                 if(point != null)
@@ -132,12 +130,23 @@ public class MapPanel extends JPanel {
         repaint();
     }
 
+    public Point2D.Double getMouseMapPoint(){
+        Point mouse = getMousePosition();
+        if(mouse == null)
+            return null;
+        double x = -(this.x - mouse.x) / getChunkSize(0);
+        double y = -(this.y - mouse.y) / getChunkSize(0);
+
+        return map.toMerc(x, y);
+    }
+
     public void paint(Graphics g) {
         super.paint(g);
 
         updateTiles();
         Graphics2D g2d = (Graphics2D) g;
         g2d.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR);
+        g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
 
         g2d.setColor(new Color(0, 0, 0, 100));
         for (int level = map.getMinimumZoom(); level < map.getMaximumZoom(); level++) {
@@ -149,16 +158,21 @@ public class MapPanel extends JPanel {
                         int r_y = new SimpleBigDecimal(loader.getY()).multiply(getChunkSize(level)).add(this.y).intValue();
 
                         g2d.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, (float)loader.getAlpha()));
-                        g2d.drawImage(loader.getImage(), r_x - 1, r_y - 1, (int) getChunkSize(level) + 2, (int) getChunkSize(level) + 2, null);
+                        g2d.drawImage(loader.getImage(), r_x, r_y, (int) getChunkSize(level) + 1, (int) getChunkSize(level) + 1, null);
                     }
                 }
             } catch (Exception ignored) { }
         }
+
+        g2d.setColor(Color.black);
         g2d.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, 1));
 
         for(MapPoint point : points) {
-            Point coordinates = map.getCoordinates(point.getLatitude(), point.getLongitude(), getChunkSize(0));
-            point.draw(g2d, (int)(coordinates.x + this.x), (int)(coordinates.y + this.y));
+            Point2D.Double coordinates = map.getCoordinates(point.getLatitude(), point.getLongitude());
+            point.x = (int)(coordinates.x * getChunkSize(0) + this.x);
+            point.y = (int)(coordinates.y * getChunkSize(0) + this.y);
+
+            point.draw(g2d);
         }
     }
 

@@ -1,4 +1,4 @@
-package com.husker.mapbrowser.impl;
+package com.husker.mapbrowser.impl.maps;
 
 import com.husker.mapbrowser.Map;
 
@@ -23,10 +23,7 @@ public class BingMaps extends Map {
         Scanner s = new Scanner(hc.getInputStream()).useDelimiter("\\A");
         String result = s.hasNext() ? s.next() : "";
 
-        System.out.println(result);
-
         pattern = result.split("\"imageUrl\":\"")[1].split("\",")[0].replace("\\/", "/").replace("{subdomain}", "t0");
-        System.out.println(pattern);
     }
 
     public String getUrl(int zoom, int x, int y) {

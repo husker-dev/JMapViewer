@@ -1,30 +1,25 @@
 package com.husker.mapbrowser;
 
 import java.awt.*;
-import java.awt.image.BufferedImage;
 
 public class MapPoint {
 
     private final double latitude, longitude;
-    private BufferedImage icon;
+    int x, y;
 
     public MapPoint(double latitude, double longitude){
         this.latitude = latitude;
         this.longitude = longitude;
     }
 
-    public void setIcon(BufferedImage icon){
-        this.icon = icon;
+    public void draw(Graphics2D g2d){
+        Rectangle bounds = getBounds();
+        g2d.fillOval(bounds.x, bounds.y, bounds.width, bounds.height);
     }
 
-    public BufferedImage getIcon(){
-        return icon;
-    }
-
-    public void draw(Graphics2D g2d, int x, int y){
-        if(icon != null) {
-            g2d.drawImage(icon, x - icon.getWidth() / 2, y - icon.getHeight(), null);
-        }
+    public Rectangle getBounds(){
+        int size = 20;
+        return new Rectangle(x - size / 2, y - size / 2, size, size);
     }
 
     public double getLatitude() {
@@ -33,5 +28,13 @@ public class MapPoint {
 
     public double getLongitude() {
         return longitude;
+    }
+
+    public int getX(){
+        return x;
+    }
+
+    public int getY(){
+        return y;
     }
 }

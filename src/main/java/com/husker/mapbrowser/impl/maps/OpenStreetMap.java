@@ -1,14 +1,14 @@
-package com.husker.mapbrowser.impl;
+package com.husker.mapbrowser.impl.maps;
 
 import com.husker.mapbrowser.Map;
 
 public class OpenStreetMap extends Map {
 
     public OpenStreetMap() {
-        super(0, 16);
+        super(0, 20);
     }
 
     public String getUrl(int zoom, int x, int y) {
-        return "https://b.tile.openstreetmap.org/" + zoom + "/" + x + "/" + y + ".png";
+        return "https://c.tile.openstreetmap.org/" + zoom + "/" + x + "/" + y + ".png";
     }
 }

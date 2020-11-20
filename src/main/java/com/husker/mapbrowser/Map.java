@@ -1,6 +1,6 @@
 package com.husker.mapbrowser;
 
-import java.awt.*;
+import java.awt.geom.Point2D;
 
 public abstract class Map {
 
@@ -21,7 +21,11 @@ public abstract class Map {
 
     public abstract String getUrl(int zoom, int x, int y);
 
-    public Point getCoordinates(double lat, double lon, double size){
-        return new Point((int)WGS84.lon2merc(lon, size), (int)WGS84.lat2merc(lat, size));
+    public Point2D.Double getCoordinates(double lat, double lon){
+        return new Point2D.Double(WGS84.lon2merc(lon), WGS84.lat2merc(lat));
+    }
+
+    public Point2D.Double toMerc(double x, double y){
+        return new Point2D.Double(WGS84.merc2lat(y), WGS84.merc2lon(x));
     }
 }
