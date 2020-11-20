@@ -2,8 +2,8 @@ plugins {
     id 'java'
 }
 
-group 'org.example'
-version '1.0-SNAPSHOT'
+group 'com.husker'
+version '0.1'
 
 sourceSets {
     main {
@@ -18,9 +18,6 @@ compileTestJava.options.encoding = 'UTF-8'
 javadoc.options.encoding = 'UTF-8'
 
 jar {
-    manifest {
-        attributes 'Main-Class': 'com.husker.launcher.Main'
-    }
     from {
         configurations.runtimeClasspath.collect { it.isDirectory() ? it : zipTree(it) }
     }
